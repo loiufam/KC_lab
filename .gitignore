@@ -1,0 +1,6 @@
+data/
+include/
+lib/
+
+*.o
+*.obj
