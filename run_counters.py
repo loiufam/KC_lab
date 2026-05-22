@@ -4,6 +4,7 @@
 import os
 import random
 import subprocess
+import resource
 import csv
 import re
 import argparse
@@ -43,10 +44,11 @@ SOLVERS = {
     }
 }
 
-INPUT_FOLDERS = ["data/bitwise", "data/pairwise", "data/ladder", "data/matrix"]
+# INPUT_FOLDERS = ["data/bitwise", "data/pairwise", "data/ladder", "data/matrix"]
+INPUT_FOLDERS = ["data/matrix"]
 
 # 预期的编码类型（对应文件夹名称）
-ENCODINGS = ["bitwise", "pairwise", "ladder", "matrix"]
+ENCODINGS = ["matrix"]
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -101,6 +103,12 @@ def parse_output(output: str, solver_name: str):
 
     return time_val, sol_val, decisions_val
 
+def limit_memory():
+    """设置子进程虚拟内存上限为 15GB"""
+    # 15 GB 转换为 Bytes
+    max_memory_bytes = 15 * 1024 * 1024 * 1024 
+    # 设置虚拟内存地址空间大小限制 (软限制, 硬限制)
+    resource.setrlimit(resource.RLIMIT_AS, (max_memory_bytes, max_memory_bytes))
 
 def run_solver(solver_name: str, filepath: str, timeout: int):
     """执行单个求解器并返回结果"""
@@ -116,10 +124,17 @@ def run_solver(solver_name: str, filepath: str, timeout: int):
             text=True,
             timeout=timeout,
             encoding="utf-8",
-            errors="replace"
+            errors="replace",
+            preexec_fn=limit_memory
         )
 
         output = (result.stdout or "") + (result.stderr or "")
+
+        if result.returncode != 0:
+            if "Memory" in output or "bad_alloc" in output or result.returncode < 0:
+                print(f"  [内存超出或崩溃] returncode={result.returncode}，可能超出了 15GB 限制。")
+                return "MEMOUT", "MEMOUT", "MEMOUT"
+            
         time_val, sol_val, decisions_val = parse_output(output, solver_name)
 
         if time_val is None and sol_val is None:
@@ -163,12 +178,12 @@ def build_sorted_encodings(instance_map):
     for enc_dict in instance_map.values():
         detected_encodings.update(enc_dict.keys())
 
-    sorted_encodings = [e for e in ENCODINGS if e in detected_encodings]
-    for e in sorted(detected_encodings):
-        if e not in sorted_encodings:
-            sorted_encodings.append(e)
+    # sorted_encodings = [e for e in ENCODINGS if e in detected_encodings]
+    # for e in sorted(detected_encodings):
+    #     if e not in sorted_encodings:
+    #         sorted_encodings.append(e)
 
-    return sorted_encodings
+    return sorted(list(detected_encodings))
 
 
 # =========================
@@ -300,7 +315,7 @@ def main():
         "-i", "--input_folders",
         nargs="+",
         default=INPUT_FOLDERS,
-        help="包含 CNF 文件的输入文件夹列表，例: -i data/bitwise data/pairwise data/ladder data/matrix"
+        help="包含 CNF 文件的输入文件夹列表，例: -i data/matrix"
     )
     parser.add_argument('-o', '--output_dir', type=str, default="./results",
                         help="CSV 结果保存的输出目录")
